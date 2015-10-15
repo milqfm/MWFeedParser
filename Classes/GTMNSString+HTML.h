@@ -63,4 +63,10 @@
 //
 - (NSString *)gtm_stringByUnescapingFromHTML;
 
+/// Similar to gtm_stringByUnescapingFromHTML, but repeatedly invokes a decision block
+/// that accepts a range to replace from and a string to replace to
+/// and returns whether to replace or skip the current range
+//
+- (NSString *)gtm_stringByUnescapingFromHTMLWithDecisionBlock:(BOOL (^)(NSRange rangeToReplaceFrom, NSString *stringToReplaceTo))decisionBlock;
+
 @end

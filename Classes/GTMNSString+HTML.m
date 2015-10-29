@@ -453,68 +453,79 @@ static int EscapeMapCompare(const void *ucharVoid, const void *mapVoid) {
 									escapingUnicode:YES];
 } // gtm_stringByEscapingAsciiHTML
 
+- (NSString *)gtm_stringByUnescapingFromHTMLWithDecisionBlock:(BOOL (^)(NSRange rangeToReplaceFrom, NSString *stringToReplaceTo))decisionBlock {
+    NSRange range = NSMakeRange(0, [self length]);
+    NSRange subrange = [self rangeOfString:@"&" options:NSBackwardsSearch range:range];
+    
+    // if no ampersands, we've got a quick way out
+    if (subrange.length == 0) return self;
+    NSMutableString *finalString = [NSMutableString stringWithString:self];
+    do {
+        NSRange semiColonRange = NSMakeRange(subrange.location, NSMaxRange(range) - subrange.location);
+        semiColonRange = [self rangeOfString:@";" options:0 range:semiColonRange];
+        range = NSMakeRange(0, subrange.location);
+        // if we don't find a semicolon in the range, we don't have a sequence
+        if (semiColonRange.location == NSNotFound) {
+            continue;
+        }
+        NSRange escapeRange = NSMakeRange(subrange.location, semiColonRange.location - subrange.location + 1);
+        NSString *escapeString = [self substringWithRange:escapeRange];
+        NSUInteger length = [escapeString length];
+        // a squence must be longer than 3 (&lt;) and less than 11 (&thetasym;)
+        if (length > 3 && length < 11) {
+            if ([escapeString characterAtIndex:1] == '#') {
+                unichar char2 = [escapeString characterAtIndex:2];
+                if (char2 == 'x' || char2 == 'X') {
+                    // Hex escape squences &#xa3;
+                    NSString *hexSequence = [escapeString substringWithRange:NSMakeRange(3, length - 4)];
+                    NSScanner *scanner = [NSScanner scannerWithString:hexSequence];
+                    unsigned value;
+                    if ([scanner scanHexInt:&value] &&
+                        value < USHRT_MAX &&
+                        value > 0
+                        && [scanner scanLocation] == length - 4) {
+                        unichar uchar = value;
+                        NSString *charString = [NSString stringWithCharacters:&uchar length:1];
+                        if (!decisionBlock || decisionBlock(escapeRange, charString)) {
+                            [finalString replaceCharactersInRange:escapeRange withString:charString];
+                        }
+                    }
+                    
+                } else {
+                    // Decimal Sequences &#123;
+                    NSString *numberSequence = [escapeString substringWithRange:NSMakeRange(2, length - 3)];
+                    NSScanner *scanner = [NSScanner scannerWithString:numberSequence];
+                    int value;
+                    if ([scanner scanInt:&value] &&
+                        value < USHRT_MAX &&
+                        value > 0
+                        && [scanner scanLocation] == length - 3) {
+                        unichar uchar = value;
+                        NSString *charString = [NSString stringWithCharacters:&uchar length:1];
+                        if (!decisionBlock || decisionBlock(escapeRange, charString)) {
+                            [finalString replaceCharactersInRange:escapeRange withString:charString];
+                        }
+                    }
+                }
+            } else {
+                // "standard" sequences
+                for (unsigned i = 0; i < sizeof(gAsciiHTMLEscapeMap) / sizeof(HTMLEscapeMap); ++i) {
+                    if ([escapeString isEqualToString:gAsciiHTMLEscapeMap[i].escapeSequence]) {
+                        NSString *newString = [NSString stringWithCharacters:&gAsciiHTMLEscapeMap[i].uchar length:1];
+                        if (!decisionBlock || decisionBlock(escapeRange, newString)) {
+                            [finalString replaceCharactersInRange:escapeRange withString:newString];
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    } while ((subrange = [self rangeOfString:@"&" options:NSBackwardsSearch range:range]).length != 0);
+    return finalString;
+} // gtm_stringByUnescapingFromHTMLWithDecisionBlock
+
 - (NSString *)gtm_stringByUnescapingFromHTML {
-	NSRange range = NSMakeRange(0, [self length]);
-	NSRange subrange = [self rangeOfString:@"&" options:NSBackwardsSearch range:range];
-	
-	// if no ampersands, we've got a quick way out
-	if (subrange.length == 0) return self;
-	NSMutableString *finalString = [NSMutableString stringWithString:self];
-	do {
-		NSRange semiColonRange = NSMakeRange(subrange.location, NSMaxRange(range) - subrange.location);
-		semiColonRange = [self rangeOfString:@";" options:0 range:semiColonRange];
-		range = NSMakeRange(0, subrange.location);
-		// if we don't find a semicolon in the range, we don't have a sequence
-		if (semiColonRange.location == NSNotFound) {
-			continue;
-		}
-		NSRange escapeRange = NSMakeRange(subrange.location, semiColonRange.location - subrange.location + 1);
-		NSString *escapeString = [self substringWithRange:escapeRange];
-		NSUInteger length = [escapeString length];
-		// a squence must be longer than 3 (&lt;) and less than 11 (&thetasym;)
-		if (length > 3 && length < 11) {
-			if ([escapeString characterAtIndex:1] == '#') {
-				unichar char2 = [escapeString characterAtIndex:2];
-				if (char2 == 'x' || char2 == 'X') {
-					// Hex escape squences &#xa3;
-					NSString *hexSequence = [escapeString substringWithRange:NSMakeRange(3, length - 4)];
-					NSScanner *scanner = [NSScanner scannerWithString:hexSequence];
-					unsigned value;
-					if ([scanner scanHexInt:&value] && 
-						value < USHRT_MAX &&
-						value > 0 
-						&& [scanner scanLocation] == length - 4) {
-						unichar uchar = value;
-						NSString *charString = [NSString stringWithCharacters:&uchar length:1];
-						[finalString replaceCharactersInRange:escapeRange withString:charString];
-					}
-					
-				} else {
-					// Decimal Sequences &#123;
-					NSString *numberSequence = [escapeString substringWithRange:NSMakeRange(2, length - 3)];
-					NSScanner *scanner = [NSScanner scannerWithString:numberSequence];
-					int value;
-					if ([scanner scanInt:&value] && 
-						value < USHRT_MAX &&
-						value > 0 
-						&& [scanner scanLocation] == length - 3) {
-						unichar uchar = value;
-						NSString *charString = [NSString stringWithCharacters:&uchar length:1];
-						[finalString replaceCharactersInRange:escapeRange withString:charString];
-					}
-				}
-			} else {
-				// "standard" sequences
-				for (unsigned i = 0; i < sizeof(gAsciiHTMLEscapeMap) / sizeof(HTMLEscapeMap); ++i) {
-					if ([escapeString isEqualToString:gAsciiHTMLEscapeMap[i].escapeSequence]) {
-						[finalString replaceCharactersInRange:escapeRange withString:[NSString stringWithCharacters:&gAsciiHTMLEscapeMap[i].uchar length:1]];
-						break;
-					}
-				}
-			}
-		}
-	} while ((subrange = [self rangeOfString:@"&" options:NSBackwardsSearch range:range]).length != 0);
-	return finalString;
+    return [self gtm_stringByUnescapingFromHTMLWithDecisionBlock:nil];
 } // gtm_stringByUnescapingHTML
 
 
